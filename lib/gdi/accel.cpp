@@ -15,14 +15,11 @@
 // #define ACCEL_DEBUG
 
 gAccel *gAccel::instance;
-
 #ifndef HAVE_HISILICON_ACCEL
 #define BCM_ACCEL
-#else
 #define STMFB_ACCEL
 #endif
 #endif
-
 
 #ifdef HAVE_HISILICON_ACCEL 
 extern int  dinobot_accel_init(void);
