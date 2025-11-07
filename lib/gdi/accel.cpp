@@ -19,7 +19,6 @@ gAccel *gAccel::instance;
 #define BCM_ACCEL
 #define STMFB_ACCEL
 #endif
-#endif
 
 #ifdef HAVE_HISILICON_ACCEL 
 extern int  dinobot_accel_init(void);
