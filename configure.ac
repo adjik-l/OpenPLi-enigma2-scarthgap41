@@ -1,492 +1,646 @@
-#include <cstring>
-#include <lib/base/init.h>
-#include <lib/base/init_num.h>
-#include <lib/gdi/accel.h>
-#include <lib/base/eerror.h>
-#include <lib/gdi/esize.h>
-#include <lib/gdi/epoint.h>
-#include <lib/gdi/erect.h>
-#include <lib/gdi/gpixmap.h>
+AC_INIT([enigma2],[4],[forum@openpli.org])
+AM_INIT_AUTOMAKE([dist-bzip2 no-define tar-pax -Wno-portability])
+AC_CONFIG_HEADERS([enigma2_config.h])
 
-/* Apparently, surfaces must be 64-byte aligned */
-#define ACCEL_ALIGNMENT_SHIFT	6
-#define ACCEL_ALIGNMENT_MASK	((1<<ACCEL_ALIGNMENT_SHIFT)-1)
+# Silent rules are available since 1.11, but older versions
+# are still in use. So don't use them unconditionally.
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-// #define ACCEL_DEBUG
+AC_USE_SYSTEM_EXTENSIONS
+AC_SYS_LARGEFILE
 
-gAccel *gAccel::instance;
+AC_PROG_CC
+AC_PROG_CXX
+m4_ifdef([LT_INIT], [LT_INIT], [AC_PROG_LIBTOOL])
+AC_CONFIG_MACRO_DIR([m4])
+AC_OPENMP()
 
-#if not defined(HAVE_HISILICON_ACCEL)
-#if not defined(__sh__)
-#define BCM_ACCEL
-#else
-#define STMFB_ACCEL
-#endif
-#endif
+AC_PATH_PROG(MSGFMT, msgfmt, AC_MSG_ERROR(Could not find msgfmt))
 
-#ifdef HAVE_HISILICON_ACCEL 
-extern int  dinobot_accel_init(void);
-extern void dinobot_accel_close(void);
-extern void dinobot_accel_blit(
-		int src_addr, int src_width, int src_height, int src_stride, int src_format,
-		int dst_addr, int dst_width, int dst_height, int dst_stride,
-		int src_x, int src_y, int width, int height,
-		int dst_x, int dst_y, int dwidth, int dheight,
-		int pal_addr,int pal_size, int flags);
-extern void dinobot_accel_fill(
-		int dst_addr, int dst_width, int dst_height, int dst_stride,
-		int x, int y, int width, int height,
-		unsigned long color);
-extern bool dinobot_accel_has_alphablending();
-#endif
+AM_PATH_PYTHON
+AX_PYTHON_DEVEL
+AX_PKG_SWIG
+AX_SWIG_ENABLE_CXX
+AX_SWIG_PYTHON
+AX_PTHREAD
 
-#ifdef STMFB_ACCEL
-extern int stmfb_accel_init(void);
-extern void stmfb_accel_close(void);
-extern void stmfb_accel_blit(
-		int src_addr, int src_width, int src_height, int src_stride, int src_format,
-		int dst_addr, int dst_width, int dst_height, int dst_stride,
-		int src_x, int src_y, int width, int height,
-		int dst_x, int dst_y, int dwidth, int dheight);
-extern void stmfb_accel_fill(
-		int dst_addr, int dst_width, int dst_height, int dst_stride,
-		int x, int y, int width, int height,
-		unsigned long color);
-#endif
+TUXBOX_APPS_DVB
 
-#ifdef BCM_ACCEL
-extern int bcm_accel_init(void);
-extern void bcm_accel_close(void);
-extern void bcm_accel_blit(
-		int src_addr, int src_width, int src_height, int src_stride, int src_format,
-		int dst_addr, int dst_width, int dst_height, int dst_stride,
-		int src_x, int src_y, int width, int height,
-		int dst_x, int dst_y, int dwidth, int dheight,
-		int pal_addr, int flags);
-extern void bcm_accel_fill(
-		int dst_addr, int dst_width, int dst_height, int dst_stride,
-		int x, int y, int width, int height,
-		unsigned long color);
-extern bool bcm_accel_has_alphablending();
-extern int bcm_accel_accumulate();
-extern int bcm_accel_sync();
-#endif
+AM_CONDITIONAL(HAVE_GIT_DIR, test -d "$srcdir/.git")
+AM_CONDITIONAL(HAVE_FAKE_GIT_DIR, test -f "$srcdir/.git/last_commit_info")
 
-gAccel::gAccel():
-	m_accel_addr(0),
-	m_accel_phys_addr(0),
-	m_accel_size(0)
-{
-	instance = this;
+dnl versions of plugins-base
+PKG_CHECK_MODULES(TUXTXT, tuxbox-tuxtxt)
+PKG_CHECK_MODULES(BASE, [freetype2 fribidi glib-2.0 libdvbsi++ libpng libxml-2.0 sigc++-3.0 libssl libcrypto])
+PKG_CHECK_MODULES(LIBDDVD, libdreamdvd, HAVE_LIBDDVD="yes", HAVE_LIBDDVD="no")
+AM_CONDITIONAL(HAVE_LIBDDVD, test "$HAVE_LIBDDVD" = "yes")
+PKG_CHECK_MODULES(AVAHI, avahi-client)
 
-#ifdef STMFB_ACCEL
-	stmfb_accel_init();
-#endif
-#ifdef BCM_ACCEL
-	m_bcm_accel_state = bcm_accel_init();
-#endif
-#ifdef HAVE_HISILICON_ACCEL
-	dinobot_accel_init();
-#endif
-}
+AC_CHECK_LIB([udfread], [udfread_init])
+AC_CHECK_LIB([dl], [dlopen], [LIBDL_LIBS="-ldl"], [AC_MSG_ERROR([Could not find libdl])])
+AC_SUBST(LIBDL_LIBS)
+AC_CHECK_LIB([jpeg], [jpeg_set_defaults], [LIBJPEG_LIBS="-ljpeg"], [AC_MSG_ERROR([Could not find libjpeg])])
+AC_SUBST(LIBJPEG_LIBS)
+AC_CHECK_LIB([ungif], [DGifOpen], [LIBGIF_LIBS="-lungif"], [AC_CHECK_LIB([gif], [DGifOpen], [LIBGIF_LIBS="-lgif"], [AC_MSG_ERROR([Could not find libgif or libungif])])])
+AC_SUBST(LIBGIF_LIBS)
 
-gAccel::~gAccel()
-{
-#ifdef STMFB_ACCEL
-	stmfb_accel_close();
-#endif
-#ifdef BCM_ACCEL
-	bcm_accel_close();
-#endif
-#ifdef HAVE_HISILICON_ACCEL
-	dinobot_accel_close();
-#endif
-	instance = 0;
-}
+AC_ARG_WITH(crashlogemail,
+	[  --with-crashlogemail=crash log email address],
+	[CRASHLOGEMAIL="$withval"],[CRASHLOGEMAIL="the OpenPLi forum"])
+AC_SUBST(CRASHLOGEMAIL)
+AC_DEFINE_UNQUOTED(CRASH_EMAILADDR,"$CRASHLOGEMAIL",[crash log email address])
 
-#ifdef ACCEL_DEBUG
-void gAccel::dumpDebug()
-{
-	eDebug("[gAccel] info --");
-	for (MemoryBlockList::const_iterator it = m_accel_allocation.begin();
-		 it != m_accel_allocation.end();
-		 ++it)
-	 {
-		 gUnmanagedSurface *surface = it->surface;
-		 if (surface)
-			eDebug("[gAccel] surface: (%d (%dk), %d (%dk)) %p %dx%d:%d",
-					it->index, it->index >> (10 - ACCEL_ALIGNMENT_SHIFT),
-					it->size, it->size >> (10 - ACCEL_ALIGNMENT_SHIFT),
-					surface, surface->stride, surface->y, surface->bpp);
-		else
-			eDebug("[gAccel]    free: (%d (%dk), %d (%dk))",
-					it->index, it->index >> (10 - ACCEL_ALIGNMENT_SHIFT),
-					it->size, it->size >> (10 - ACCEL_ALIGNMENT_SHIFT));
-	 }
-	eDebug("--");
-}
-#else
-void gAccel::dumpDebug() {}
-#endif
+AC_ARG_WITH(boxtype,
+	[  --with-boxtype=NAME box type [[none,dm800...]]],
+	[BOXTYPE="$withval"],[BOXTYPE="dm800"])
+AC_SUBST(BOXTYPE)
+AC_DEFINE_UNQUOTED(BOXTYPE,"$BOXTYPE",[box type])
 
-void gAccel::releaseAccelMemorySpace()
-{
-	eSingleLocker lock(m_allocation_lock);
-	dumpDebug();
-	for (MemoryBlockList::const_iterator it = m_accel_allocation.begin();
-		 it != m_accel_allocation.end();
-		 ++it)
-	{
-		gUnmanagedSurface *surface = it->surface;
-		if (surface != NULL)
-		{
-			int size = surface->y * surface->stride;
-#ifdef ACCEL_DEBUG
-			eDebug("[gAccel] %s: Re-locating %p->%x(%p) %dx%d:%d", __func__, surface, surface->data_phys, surface->data, surface->x, surface->y, surface->bpp);
-#endif
-			unsigned char *new_data = new unsigned char [size];
-			memcpy(new_data, surface->data, size);
-			surface->data = new_data;
-			surface->data_phys = 0;
-		}
-	}
-	m_accel_allocation.clear();
-	m_accel_size = 0;
-}
+AC_ARG_WITH(colorlcd,
+	AC_HELP_STRING([--with-colorlcd], [use 96x64 16bpp color display, yes or no]),
+	[[withcolorlcd=$withval]],
+	[[withcolorlcd=no]]
+)
+if test x"$withcolorlcd" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD, 1,[Define when using a 96x64 color display device])
+fi
+AM_CONDITIONAL(HAVE_COLORLCD, test x"$withcolorlcd" != xno)
 
-void gAccel::setAccelMemorySpace(void *addr, int phys_addr, int size)
-{
-	if (size > 0)
-	{
-		eSingleLocker lock(m_allocation_lock);
-		m_accel_size = size >> ACCEL_ALIGNMENT_SHIFT;
-		m_accel_addr = addr;
-		m_accel_phys_addr = phys_addr;
-		m_accel_allocation.push_back(MemoryBlock(NULL, 0, m_accel_size));
-		dumpDebug();
-	}
-}
+AC_ARG_WITH(colorlcd128,
+	AC_HELP_STRING([--with-colorlcd128], [use 128x64 16bpp color display, yes or no]),
+	[[withcolorlcd128=$withval]],
+	[[withcolorlcd128=no]]
+)
+if test x"$withcolorlcd128" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD128, 1,[Define when using a 128x64 color display device])
+fi
+AM_CONDITIONAL(HAVE_COLORLCD128, test x"$withcolorlcd" != xno)
 
-bool gAccel::hasAlphaBlendingSupport()
-{
-#ifdef BCM_ACCEL
-	return bcm_accel_has_alphablending();
-#endif
-#ifdef HAVE_HISILICON_ACCEL
-	return dinobot_accel_has_alphablending();
-#else
-	return false;
-#endif
-}
+AC_ARG_WITH(colorlcd220,
+	AC_HELP_STRING([--with-colorlcd220], [use 220x176 16bpp color display, yes or no]),
+	[[withcolorlcd220=$withval]],
+	[[withcolorlcd220=no]]
+)
+if test x"$withcolorlcd220" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD220, 1,[Define when using a 220x176 color display device])
+fi
+AM_CONDITIONAL(HAVE_COLORLCD220, test x"$withcolorlcd220" != xno)
 
-int gAccel::blit(gUnmanagedSurface *dst, gUnmanagedSurface *src, const eRect &p, const eRect &area, int flags)
-{
-#ifdef STMFB_ACCEL
-	int src_format = 0;
-	gUnmanagedSurface *surfaceTmp = new gUnmanagedSurface(area.width(), area.height(), dst->bpp);
+AC_ARG_WITH(colorlcd240,
+	AC_HELP_STRING([--with-colorlcd240], [use 240x80 16bpp color display, yes or no]),
+	[[withcolorlcd240=$withval]],
+	[[withcolorlcd240=no]]
+)
+if test x"$withcolorlcd240" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD240, 1,[Define when using a 240x80 color display device])
+fi
+AM_CONDITIONAL(HAVE_COLORLCD240, test x"$withcolorlcd240" != xno)
 
-	if (src->bpp == 32)
-		src_format = 0;
-	else if ((src->bpp == 8) && (dst->bpp == 32))
-	{
-		src_format = 1;
-		if (accelAlloc(surfaceTmp))
-			return -1;
+AC_ARG_WITH(colorlcd390,
+	AC_HELP_STRING([--with-colorlcd390], [use 390x240 16bpp color display, yes or no]),
+	[[withcolorlcd390=$withval]],
+	[[withcolorlcd390=no]]
+)
+if test x"$withcolorlcd390" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD390, 1,[Define when using a 390x240 color display device])
+fi
 
-		__u8 *srcptr=(__u8*)src->data;
-		__u8 *dstptr=(__u8*)surfaceTmp->data;
-		__u32 pal[256];
+AM_CONDITIONAL(HAVE_COLORLCD390, test x"$withcolorlcd390" != xno)
 
-		for (int i=0; i<256; ++i)
-		{
-			if (src->clut.data && (i<src->clut.colors))
-				pal[i]=(src->clut.data[i].a<<24)|(src->clut.data[i].r<<16)|(src->clut.data[i].g<<8)|(src->clut.data[i].b);
-			else
-				pal[i]=0x010101*i;
-			if ((pal[i]&0xFF000000) >= 0xE0000000)
-				pal[i] = 0xFF000000;
-			pal[i]^=0xFF000000;
-		}
-		srcptr+=area.left()*src->bypp+area.top()*src->stride;
+AC_ARG_WITH(colorlcd400,
+	AC_HELP_STRING([--with-colorlcd400], [use 400x176 16bpp color display, yes or no]),
+	[[withcolorlcd400=$withval]],
+	[[withcolorlcd400=no]]
+)
+if test x"$withcolorlcd400" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD400, 1,[Define when using a 400x176 color display device])
+fi
 
-		for (int y=0; y<area.height(); y++)
-		{
-			int width=area.width();
-			unsigned char *psrc=(unsigned char*)srcptr;
-			__u32 *pdst=(__u32*)dstptr;
+AM_CONDITIONAL(HAVE_COLORLCD400, test x"$withcolorlcd400" != xno)
 
-			while (width--)
-				*pdst++=pal[*psrc++];
+AC_ARG_WITH(colorlcd480,
+	AC_HELP_STRING([--with-colorlcd480], [use 480x320 16bpp color display, yes or no]),
+	[[withcolorlcd480=$withval]],
+	[[withcolorlcd480=no]]
+)
+if test x"$withcolorlcd480" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD480, 1,[Define when using a 480x320 color display device])
+fi
 
-			srcptr+=src->stride;
-			dstptr+=area.width() * 4;
-		}
-	} else {
-		if (surfaceTmp->data_phys)
-			accelFree(surfaceTmp);
-		return -1;
-	}
+AM_CONDITIONAL(HAVE_COLORLCD480, test x"$withcolorlcd480" != xno)
 
-	if (surfaceTmp->data_phys)
-	{
-		stmfb_accel_blit(
-			surfaceTmp->data_phys, 0, 0, area.width() * 4, src_format,
-			dst->data_phys, dst->x, dst->y, dst->stride,
-			0, 0, area.width(), area.height(),
-			p.x(), p.y(), p.width(), p.height());
-		accelFree(surfaceTmp);
-	} else {
-		stmfb_accel_blit(
-			src->data_phys, src->x, src->y, src->stride, src_format,
-			dst->data_phys, dst->x, dst->y, dst->stride,
-			area.left(), area.top(), area.width(), area.height(),
-			p.x(), p.y(), p.width(), p.height());
-	}
-	return 0;
-#endif
-#ifdef BCM_ACCEL
-	if (!m_bcm_accel_state)
-	{
-		unsigned int pal_addr = 0;
-		int src_format = 0;
-		if (src->bpp == 32)
-			src_format = 0;
-		else if ((src->bpp == 8) && src->clut.data)
-		{
-			src_format = 1;
-			/* sync pal */
-			if (src->clut.data_phys == 0)
-			{
-				/* sync pal */
-				pal_addr = src->stride * src->y;
-				unsigned int *pal = (unsigned int*)(((unsigned char*)src->data) + pal_addr);
-				pal_addr += src->data_phys;
-				for (int i = 0; i < src->clut.colors; ++i)
-					*pal++ = src->clut.data[i].argb() ^ 0xFF000000;
-				src->clut.data_phys = pal_addr;
-			}
-			else
-			{
-				pal_addr = src->clut.data_phys;
-			}
-		} else
-			return -1; /* unsupported source format */
+AC_ARG_WITH(colorlcd720,
+	AC_HELP_STRING([--with-colorlcd720], [use 720x576 16bpp color display, yes or no]),
+	[[withcolorlcd720=$withval]],
+	[[withcolorlcd720=no]]
+)
+if test x"$withcolorlcd720" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD720, 1,[Define when using a 720x576 color display device])
+fi
 
-		bcm_accel_blit(
-			src->data_phys, src->x, src->y, src->stride, src_format,
-			dst->data_phys, dst->x, dst->y, dst->stride,
-			area.left(), area.top(), area.width(), area.height(),
-			p.x(), p.y(), p.width(), p.height(),
-			pal_addr, flags);
-		return 0;
-	}
-#endif
-#ifdef HAVE_HISILICON_ACCEL
-		unsigned long pal_addr = 0;
-		unsigned int  pal_size = 0;
-		int src_format = 0;
-		if (src->bpp == 32)
-			src_format = 0;
-		else if ((src->bpp == 8) && src->clut.data)
-		{
-			src_format = 1;
-			pal_size = src->clut.colors*4*16/16;
-			pal_addr = (unsigned long)new unsigned char [pal_size];
-			/* sync pal */
-			if (src->clut.data_phys == 0)
-			{
-				/* sync pal */
-				unsigned long *pal = (unsigned long*)pal_addr;
-				for (int i = 0; i < src->clut.colors; ++i)
-				    *pal++ = src->clut.data[i].argb() ^ 0xFF000000;
-				src->clut.data_phys = pal_addr;
-				eDebug("!!!!!!!!!![gAccel] pal_addr1 %x clors=%d!!!!!!!!!!",pal_addr,src->clut.colors);
-			}
-			else
-			{
-				//memcpy((void*)pal_addr ,(void *)src->clut.data_phys,pal_size);
-				unsigned long *pal = (unsigned long*)pal_addr;
-				for (int i = 0; i < src->clut.colors; ++i)
-				    *pal++ = src->clut.data[i].argb() ^ 0xFF000000;
-				eDebug("!!!!!!!!!![gAccel] pal_addr2 %x clors=%d!!!!!!!!!!",pal_addr,src->clut.colors);
-			}
-		} else
-			return -1; /* unsupported source format */
+AM_CONDITIONAL(HAVE_COLORLCD720, test x"$withcolorlcd720" != xno)
 
-		dinobot_accel_blit(
-			src->data_phys, src->x, src->y, src->stride, src_format,
-			dst->data_phys, dst->x, dst->y, dst->stride,
-			area.left(), area.top(), area.width(), area.height(),
-			p.x(), p.y(), p.width(), p.height(),
-			pal_addr, pal_size,flags);
+AC_ARG_WITH(colorlcd800,
+	AC_HELP_STRING([--with-colorlcd800], [use 800x480 16bpp color display, yes or no]),
+	[[withcolorlcd800=$withval]],
+	[[withcolorlcd800=no]]
+)
+if test x"$withcolorlcd800" != xno ; then
+	AC_DEFINE(HAVE_COLORLCD800, 1,[Define when using a 800x480 color display device])
+fi
 
-		if(pal_size && pal_addr)
-		{
-			delete (unsigned char *)pal_addr;
-		}
-		return 0;
-#endif
-	return -1;
-}
+AM_CONDITIONAL(HAVE_COLORLCD800, test x"$withcolorlcd800" != xno)
 
-int gAccel::fill(gUnmanagedSurface *dst, const eRect &area, unsigned long col)
-{
-#ifdef FORCE_NO_FILL_ACCELERATION
-	return -1;
-#endif
-#ifdef BCM_ACCEL
-	if (!m_bcm_accel_state) {
-		bcm_accel_fill(
-			dst->data_phys, dst->x, dst->y, dst->stride,
-			area.left(), area.top(), area.width(), area.height(),
-			col);
-		return 0;
-	}
-#endif
+AM_CONDITIONAL(DMAMLOGIC, test "$BOXTYPE" == "dreamone" -o "$BOXTYPE" == "dreamtwo")
+AM_CONDITIONAL(DREAMBOX, test `echo "$BOXTYPE" | cut -b 1-2` == "dm" -o `echo "$BOXTYPE" | cut -b 1-5` == "dream")
+AM_CONDITIONAL(HAVE_TEMPFANCONTROL, test "$BOXTYPE" == dm8000 -o "$BOXTYPE" == dm800se -o "$BOXTYPE" == dm500hd -o "$BOXTYPE" == dm820 -o "$BOXTYPE" == dm7080)
 
-#ifdef HAVE_HISILICON_ACCEL
-	dinobot_accel_fill(
-		dst->data_phys, dst->x, dst->y, dst->stride,
-		area.left(), area.top(), area.width(), area.height(),
-		col);
-	return 0;
-#endif
-	return -1;
-}
+AM_CONDITIONAL(DREAMONE, test "$BOXTYPE" == dreamone)
+AM_CONDITIONAL(DREAMTWO, test "$BOXTYPE" == dreamtwo)
+AM_CONDITIONAL(DM900, test "$BOXTYPE" == dm900)
+AM_CONDITIONAL(DM920, test "$BOXTYPE" == dm920)
+AM_CONDITIONAL(DM8000, test "$BOXTYPE" == dm8000)
+AM_CONDITIONAL(DM7080, test "$BOXTYPE" == dm7080)
+AM_CONDITIONAL(DM820, test "$BOXTYPE" == dm820)
+AM_CONDITIONAL(DM520, test "$BOXTYPE" == dm520)
+AM_CONDITIONAL(DM7020HD, test "$BOXTYPE" == dm7020hd)
+AM_CONDITIONAL(DM7020HDV2, test "$BOXTYPE" == dm7020hdv2)
+AM_CONDITIONAL(DM800, test "$BOXTYPE" == dm800)
+AM_CONDITIONAL(DM800SE, test "$BOXTYPE" == dm800se)
+AM_CONDITIONAL(DM800SEV2, test "$BOXTYPE" == dm800sev2)
+AM_CONDITIONAL(DM500HD, test "$BOXTYPE" == dm500hd)
+AM_CONDITIONAL(DM500HDV2, test "$BOXTYPE" == dm500hdv2)
 
-int gAccel::accumulate()
-{
-#ifdef BCM_ACCEL
-	if (!m_bcm_accel_state)
-	{
-		return bcm_accel_accumulate();
-	}
-#endif
-	return -1;
-}
+AM_CONDITIONAL(HAVE_COLORLCD3, test "$BOXTYPE" == dm7080)
+AM_CONDITIONAL(HAVE_COLORLCD240, test "$BOXTYPE" == dreamtwo)
+AM_CONDITIONAL(HAVE_COLORLCD2, test "$BOXTYPE" == dm800se -o "$BOXTYPE" == dm800sev2 -o "$BOXTYPE" == dm820)
+AM_CONDITIONAL(HAVE_COLORLCD1, test "$BOXTYPE" == dm8000 -o "$BOXTYPE" == dm800 -o "$BOXTYPE" == dm7020hd -o "$BOXTYPE" == dm7020hdv2)
+AM_CONDITIONAL(HAVE_GRAUTEC8000, test "$BOXTYPE" == dm8000)
+AM_CONDITIONAL(HAVE_GRAUTEC70X0, test "$BOXTYPE" == dm7020hd -o "$BOXTYPE" == dm7020hdv2 -o "$BOXTYPE" == dm7080)
 
-int gAccel::sync()
-{
-#ifdef BCM_ACCEL
-	if (!m_bcm_accel_state)
-	{
-		return bcm_accel_sync();
-	}
-#endif
-	return -1;
-}
+AS_IF([test "$BOXTYPE" == "dreamone"],[AC_DEFINE(HWDREAMONE, 1,[dreamone])])
+AS_IF([test "$BOXTYPE" == "dreamtwo"],[AC_DEFINE(HWDREAMTWO, 1,[dreamtwo])])
+AS_IF([test "$BOXTYPE" == "dm8000"],[AC_DEFINE(HWDM8000, 1,[dm8000])])
+AS_IF([test "$BOXTYPE" == "dm7020hd" -o "$BOXTYPE" == "dm7020hdv2"],[AC_DEFINE(HWDM7020HD, 1,[dm7020hd])])
+AS_IF([test "$BOXTYPE" == "dm7080"],[AC_DEFINE(HWDM7080, 1,[dm7080])])
+AS_IF([test "$BOXTYPE" == "dm820"],[AC_DEFINE(HWDM820, 1,[dm820])])
+AS_IF([test "$BOXTYPE" == "dm520" -o "$BOXTYPE" == "dm525"],[AC_DEFINE(HWDM520, 1,[dm520])])
+AS_IF([test "$BOXTYPE" == "dm900"],[AC_DEFINE(HWDM900, 1,[dm900])])
+AS_IF([test "$BOXTYPE" == "dm920"],[AC_DEFINE(HWDM920, 1,[dm920])])
+AS_IF([test "$BOXTYPE" == "dm800se"],[AC_DEFINE(HWDM800SE, 1,[dm800se])])
+AS_IF([test "$BOXTYPE" == "dm500hd"],[AC_DEFINE(HWDM500HD, 1,[dm500hd])])
+AS_IF([test "$BOXTYPE" == "dm800sev2"],[AC_DEFINE(HWDM800SEV2, 1,[dm800sev2])])
+AS_IF([test "$BOXTYPE" == "dm500hdv2"],[AC_DEFINE(HWDM500HDV2, 1,[dm500hdv2])])
 
-int gAccel::accelAlloc(gUnmanagedSurface* surface)
-{
-	int stride = (surface->stride + ACCEL_ALIGNMENT_MASK) & ~ACCEL_ALIGNMENT_MASK;
-	int size = stride * surface->y;
-	if (!size)
-	{
-		eDebug("[gAccel] accelAlloc called with size 0");
-		return -2;
-	}
-	if (surface->bpp == 8)
-		size += 256 * 4;
-	else if (surface->bpp != 32)
-	{
-		eDebug("[gAccel] Accel does not support bpp=%d", surface->bpp);
-		return -4;
-	}
+if test `echo "$BOXTYPE" | cut -b 1-2` == "dm" -o `echo "$BOXTYPE" | cut -b 1-5` == "dream"; then
+	AC_DEFINE(DREAMBOX, 1, [Dreambox hardware])
+	AC_DEFINE(KEY_PLAY_ACTUALLY_IS_KEY_PLAYPAUSE, 1,[define when rc sends a KEY_PLAY event for its KEY_PLAYPAUSE key])
+fi
 
-#ifdef ACCEL_DEBUG
-	eDebug("[gAccel] [%s] %p size=%d %dx%d:%d", __func__, surface, size, surface->x, surface->y, surface->bpp);
-#endif
+if test "$BOXTYPE" == "dreamone" -o "$BOXTYPE" == "dreamtwo"; then
+	AC_DEFINE(DMAMLOGIC, 1, [Dreambox Amlogic hardware])
+fi
 
-	size += ACCEL_ALIGNMENT_MASK;
-	size >>= ACCEL_ALIGNMENT_SHIFT;
+if test "$BOXTYPE" == "dm7080" -o "$BOXTYPE" == "dm820" -o "$BOXTYPE" == "dm800se" -o "$BOXTYPE" == "dm800sev2" -o "$BOXTYPE" == "dm7020hd" -o "$BOXTYPE" == "dm7020hdv2" -o "$BOXTYPE" == "dm900" -o "$BOXTYPE" == "dm920" -o "$BOXTYPE" == "dreamone" -o "$BOXTYPE" == "dreamtwo"; then
+	AC_DEFINE(DREAMBOX_DUAL_TUNER, 1,[define dreambox dual tuner])
+fi
 
-	eSingleLocker lock(m_allocation_lock);
+if test "$BOXTYPE" == "dm7080" -o "$BOXTYPE" == "dm520" -o "$BOXTYPE" == "dm820"  -o "$BOXTYPE" == "dm900" -o "$BOXTYPE" == "dm920"; then
+	AC_DEFINE(CONFIG_ION, 1,[define BOX use ION Allocator])
+fi
 
-	for (MemoryBlockList::iterator it = m_accel_allocation.begin();
-		 it != m_accel_allocation.end();
-		 ++it)
-	{
-		if ((it->surface == NULL) && (it->size >= size))
-		{
-			int remain = it->size - size;
-			if (remain)
-			{
-				/* Add empty item before this one with the remaining memory */
-				m_accel_allocation.insert(it, MemoryBlock(NULL, it->index, remain));
-				/* it points behind the new item */
-				it->index += remain;
-				it->size = size;
-			}
-			it->surface = surface;
-			surface->data = ((unsigned char*)m_accel_addr) + (it->index << ACCEL_ALIGNMENT_SHIFT);
-			surface->data_phys = m_accel_phys_addr + (it->index << ACCEL_ALIGNMENT_SHIFT);
-			surface->stride = stride;
-			dumpDebug();
-			return 0;
-		}
-	}
+if test "$BOXTYPE" == "dm7080" -o "$BOXTYPE" == "dm820" -o "$BOXTYPE" == "dm900" -o "$BOXTYPE" == "dm920"; then
+	AC_DEFINE(HAVE_HDMIIN_DM, 1,[has hdmi in dm])
+fi
 
-	eDebug("[gAccel] alloc failed");
-	return -3;
-}
+if test "$BOXTYPE" == "dm900" -o "$BOXTYPE" == "dm920"; then
+	AC_DEFINE(DM9X0_LCD, 1,[define when we need to move lcd text a bit to the right])
+fi
 
-void gAccel::accelFree(gUnmanagedSurface* surface)
-{
-	int phys_addr = surface->data_phys;
-	if (phys_addr != 0)
-	{
-#ifdef ACCEL_DEBUG
-		eDebug("[gAccel] [%s] %p->%x %dx%d:%d", __func__, surface, surface->data_phys, surface->x, surface->y, surface->bpp);
-#endif
-		/* The lock scope is "good enough", the only other method that
-		 * might alter data_phys is the global release, and that will
-		 * be called in a safe context. So don't obtain the lock. */
-		eSingleLocker lock(m_allocation_lock);
+if test "$BOXTYPE" == "dreamone" -o "$BOXTYPE" == "dreamtwo"; then
+	AC_DEFINE(HAVE_AMLOGIC, 1,[define when we need to use amlogic])
+fi
 
-		phys_addr -= m_accel_phys_addr;
-		phys_addr >>= ACCEL_ALIGNMENT_SHIFT;
+if test "$BOXTYPE" == "dm7080" -o "$BOXTYPE" == "dm820" -o "$BOXTYPE" == "dm900" -o "$BOXTYPE" == "dm920"; then
+	AC_DEFINE(HAVE_HDMIIN_DREAMBOX, 1,[has dreambox hdmi in])
+fi
 
-		for (MemoryBlockList::iterator it = m_accel_allocation.begin();
-			 it != m_accel_allocation.end();
-			 ++it)
-		{
-			if (it->surface == surface)
-			{
-				ASSERT(it->index == phys_addr);
-				/* Mark as free */
-				it->surface = NULL;
-				MemoryBlockList::iterator current = it;
-				/* Merge with previous item if possible */
-				if (it != m_accel_allocation.begin())
-				{
-					MemoryBlockList::iterator previous = it;
-					--previous;
-					if (previous->surface == NULL)
-					{
-						current = previous;
-						previous->size += it->size;
-						m_accel_allocation.erase(it);
-					}
-				}
-				/* Merge with next item if possible */
-				if (current != m_accel_allocation.end())
-				{
-					it = current;
-					++it;
-					if ((it != m_accel_allocation.end()) && (it->surface == NULL))
-					{
-						current->size += it->size;
-						m_accel_allocation.erase(it);
-					}
-				}
-				break;
-			}
-		}
-		/* Mark as disposed (yes, even if it wasn't in our administration) */
-		surface->data = 0;
-		surface->data_phys = 0;
-		dumpDebug();
-	}
-}
+if test "$BOXTYPE" == "u5" -o "$BOXTYPE" == "u5pvr" -o "$BOXTYPE" == "u51" -o "$BOXTYPE" == "u52" -o "$BOXTYPE" == "u53" -o "$BOXTYPE" == "u532" -o "$BOXTYPE" == "u533" -o "$BOXTYPE" == "u54" -o "$BOXTYPE" == "u55" -o "$BOXTYPE" == "u56" -o "$BOXTYPE" == "u57" -o "$BOXTYPE" == "u571" -o "$BOXTYPE" == "u41" -o "$BOXTYPE" == "u42" -o "$BOXTYPE" == "u43"; then
+	AC_DEFINE(HAVE_HISILICON, 1,[define add HISILICON chip])
+	AC_DEFINE(KEY_F6_TO_KEY_VIDEO, 1,[define when rc VIDEO key sends a KEY_F6 event for its KEY_VIDEO key])
+fi
 
-eAutoInitP0<gAccel> init_gAccel(eAutoInitNumbers::graphic-2, "graphics acceleration manager");
+AC_ARG_WITH(nolcd,
+	AC_HELP_STRING([--with-nolcd], [disable ascii based lcd, yes or no]),
+	[[withnolcd=$withval]],
+	[[withnolcd=no]]
+)
+if test x"$withnolcd" != xno ; then
+	AC_DEFINE(NO_LCD, 1,[Define when disable an ascii based lcd device])
+fi
+AM_CONDITIONAL(NO_LCD, test x"$withnolcd" != xno)
+
+AC_ARG_WITH(textlcd,
+	AC_HELP_STRING([--with-textlcd], [use ascii based lcd, yes or no]),
+	[[withtextlcd=$withval]],
+	[[withtextlcd=no]]
+)
+if test x"$withtextlcd" != xno ; then
+	AC_DEFINE(HAVE_TEXTLCD, 1,[Define when using an ascii based lcd device])
+fi
+AM_CONDITIONAL(HAVE_TEXTLCD, test x"$withtextlcd" != xno)
+
+AC_ARG_WITH(7segment,
+	AC_HELP_STRING([--with-7segment], [use 7 segment lcd, yes or no]),
+	[[TEXTSKIN="7segment"]],
+	[[TEXTSKIN="default"]]
+)
+AC_SUBST(TEXTSKIN)
+if test x"$with7segment" != xno ; then
+	AC_DEFINE(HAVE_7SEGMENT, 1,[Define when using an ascii based lcd device])
+fi
+AM_CONDITIONAL(HAVE_7SEGMENT, test x"$with7segment" != xno)
+
+if test `echo "$BOXTYPE" | cut -b 1-7` == "mbmicro"; then
+	AC_DEFINE(FORCE_NO_BLENDING_ACCELERATION, 1,[define when the framebuffer acceleration does not have alphablending support, though the autodetection might indicate that it does])
+	AC_DEFINE(FORCE_NO_FILL_ACCELERATION, 1,[define when the framebuffer acceleration does not have fill support])
+	AC_DEFINE(FORCE_ADVANCED_REMOTE, 1,[define to fixup the input device identification when the remote control is actually an 'advanced' remote (with play/forward/rewind keys)])
+	AC_DEFINE(KEY_PLAY_ACTUALLY_IS_KEY_PLAYPAUSE, 1,[define when rc sends a KEY_PLAY event for its KEY_PLAYPAUSE key])
+fi
+
+if test `echo "$BOXTYPE" | cut -b 1-2` == "vu"; then
+	AC_DEFINE(FORCE_NO_BLENDING_ACCELERATION, 1,[define when the framebuffer acceleration does not have alphablending support, though the autodetection might indicate that it does])
+	AC_DEFINE(FORCE_NO_FILL_ACCELERATION, 1,[define when the framebuffer acceleration does not have fill support])
+	AC_DEFINE(FORCE_ADVANCED_REMOTE, 1,[define to fixup the input device identification when the remote control is actually an 'advanced' remote (with play/forward/rewind keys)])
+fi
+
+AC_ARG_WITH(accelerationthreshold,
+	AC_HELP_STRING([--with-accelerationthreshold=n], [use acceleration threshold of n bytes]),
+	[[with_accelerationthreshold=$withval]],
+	[[with_accelerationthreshold=48000]]
+)
+
+AC_DEFINE_UNQUOTED(GFX_SURFACE_ACCELERATION_THRESHOLD, $with_accelerationthreshold,[Configure threshold for accelerated surfaces (in bytes)])
+
+AC_ARG_WITH(fillaccelerationthreshold,
+	AC_HELP_STRING([--with-fillaccelerationthreshold=n], [use fill acceleration threshold of n bytes]),
+	[[with_fillaccelerationthreshold=$withval]],
+	[[with_fillaccelerationthreshold=80000]]
+)
+
+AC_DEFINE_UNQUOTED(GFX_SURFACE_FILL_ACCELERATION_THRESHOLD, $with_fillaccelerationthreshold,[Configure threshold for accelerated fill operations (in bytes)])
+
+AC_ARG_WITH(blitaccelerationthreshold,
+	AC_HELP_STRING([--with-blitaccelerationthreshold=n], [use blit acceleration threshold of n bytes]),
+	[[with_blitaccelerationthreshold=$withval]],
+	[[with_blitaccelerationthreshold=0]]
+)
+
+AC_DEFINE_UNQUOTED(GFX_SURFACE_BLIT_ACCELERATION_THRESHOLD, $with_blitaccelerationthreshold,[Configure threshold for accelerated blit operations (in bytes)])
+
+AC_ARG_WITH(alphablendingacceleration,
+	AC_HELP_STRING([--with-alphablendingacceleration=never/always/auto], [alphablending acceleration strategy: never accelerate / always accelerate / automatically decide when to accelerate (default)]),
+	[[with_alphablendingacceleration=$withval]],
+	[[with_alphablendingacceleration=auto]]
+)
+
+if test x"$with_alphablendingacceleration" = xnever ; then
+	AC_DEFINE_UNQUOTED(FORCE_NO_BLENDING_ACCELERATION, 1, [Do not attempt to accelerate alphablending blits])
+elif test x"$with_alphablendingacceleration" = xalways ; then
+	AC_DEFINE_UNQUOTED(FORCE_ALPHABLENDING_ACCELERATION, 1, [Accelerate alphablending blits])
+fi
+
+AC_ARG_WITH(accelerationaccumulation,
+	AC_HELP_STRING([--with-accelerationaccumulation], [accumulate blit/fill acceleration operations]),
+	[[with_accelerationaccumulation=$withval]],
+	[[with_accelerationaccumulation=no]]
+)
+
+if test x"$with_accelerationaccumulation" = xyes ; then
+	AC_DEFINE(SUPPORT_ACCUMULATED_ACCELERATION_OPERATIONS, 1,[Accumulate blit/fill acceleration operations])
+fi
+
+AC_ARG_WITH(libvugles2,
+	AS_HELP_STRING([--with-libvugles2],[use libvugles2, yes or no]),
+	[with_libvugles2=$withval],[with_libvugles2=no])
+if test "$with_libvugles2" = "yes"; then
+	PKG_CHECK_MODULES(LIBVUGLES2, [libvugles2])
+	GLES_CFLAGS="-DUSE_LIBVUGLES2"
+fi
+AM_CONDITIONAL(HAVE_LIBVUGLES2, test "$with_libvugles2" = "yes")
+
+AC_ARG_WITH(libhiaccel,
+	AS_HELP_STRING([--with-libhiaccel],[use libhiaccel, yes or no]),
+	[with_libhiaccel=$withval],[with_libhiaccel=no])
+if test "$with_libhiaccel" = "yes"; then
+	PKG_CHECK_MODULES(LIBHIACCEL, [libhiaccel])
+	HIACCEL_CFLAGS="-DUSE_LIBHIACCEL"
+fi
+
+if test x"$with_libhiaccel" != xno ; then
+	AC_DEFINE(HAVE_HISILICON_ACCEL, 1,[define add HISILICON ACCEL])
+fi
+
+AC_ARG_WITH(osdanimation,
+	AC_HELP_STRING([--with-osdanimation], [use osd animation, yes or no]),
+	[[withosdanimation=$withval]],
+	[[withosdanimation=no]]
+)
+if test x"$withosdanimation" != xno ; then
+
+	AC_DEFINE(HAVE_OSDANIMATION, 1,[Define if driver supports animation of osd])
+fi
+AM_CONDITIONAL(HAVE_OSDANIMATION, test x"$withosdanimation" != xno)
+
+AC_ARG_WITH(libsdl,
+	AS_HELP_STRING([--with-libsdl],[use libsdl, yes or no]),
+	[with_libsdl=$withval],[with_libsdl=no])
+if test "$with_libsdl" = "yes"; then
+	PKG_CHECK_MODULES(LIBSDL, sdl)
+fi
+AM_CONDITIONAL(HAVE_LIBSDL, test "$with_libsdl" = "yes")
+
+AC_ARG_WITH(libxine,
+	AS_HELP_STRING([--with-libxine],[use libxine, yes or no]),
+	[with_libxine=$withval],[with_libxine=no])
+if test "$with_libxine" = "yes"; then
+	PKG_CHECK_MODULES(LIBXINE, libxine)
+	AC_DEFINE([WITH_XINE],[1],[Define to 1 if you have libxine])
+fi
+AM_CONDITIONAL(HAVE_LIBXINE, test "$with_libxine" = "yes")
+
+AC_ARG_WITH(debug,
+	AS_HELP_STRING([--without-debug],[disable debugging code]),
+	[with_debug="$withval"],[with_debug="yes"])
+if test "$with_debug" = "yes"; then
+	AC_DEFINE([DEBUG],[1],[Define to 1 to enable debugging code])
+fi
+
+AC_ARG_WITH(memcheck,
+	AS_HELP_STRING([--with-memcheck],[enable memory leak checks]),
+	[with_memcheck="$withval"],[with_memcheck="no"])
+if test "$with_memcheck" = "yes"; then
+	AC_DEFINE([MEMLEAK_CHECK],[1],[Define to 1 to enable memory leak checks])
+fi
+
+AC_ARG_WITH(po,
+	AS_HELP_STRING([--with-po],[enable updating of po files]),
+	[with_po="$withval"],[with_po="no"])
+if test "$with_po" = "yes"; then
+	AC_PATH_PROG(MSGINIT, msginit)
+	AC_PATH_PROG(MSGMERGE, msgmerge)
+	AC_PATH_PROG(MSGUNIQ, msguniq)
+	AC_PATH_PROG(MSGATTRIB, msgattrib)
+	AC_PATH_PROG(XGETTEXT, xgettext)
+	if test -z "$MSGINIT" -o -z "$MSGMERGE" -o -z "$MSGUNIQ" -o -z "$MSGATTRIB" -o -z "$XGETTEXT"; then
+		AC_MSG_ERROR([Could not find required gettext tools])
+	fi
+fi
+AM_CONDITIONAL(UPDATE_PO, test "$with_po" = "yes")
+
+AC_ARG_WITH(alsa,
+	AC_HELP_STRING([--with-alsa], [Enable ALSA support]),
+	[[with_alse=$withval]],
+	[[with_alse=no]]
+)
+if test x"$with_alsa" == xyes ; then
+	AC_DEFINE(HAVE_ALSA, 1,[Enables ALSA support])
+	PKG_CHECK_MODULES(ALSA, alsa)
+fi
+
+AC_ARG_WITH(alsacard,
+	AC_HELP_STRING([--with-alsacard=card], [use 'card' for alsa card device, e.g. hw:0]),
+	[[with_alsacard=$withval]],
+	[[with_alsacard=no]]
+)
+if test x"$with_alsacard" != xno ; then
+	AC_DEFINE_UNQUOTED(ALSA_CARD, "$withval",[Defines which alsa card to use])
+fi
+
+AC_ARG_WITH(alsamixer,
+	AC_HELP_STRING([--with-alsamixer=mixername], [use alsa 'mixername' for volume control, e.g. Master]),
+	[[with_alsamixer=$withval]],
+	[[with_alsamixer=no]]
+)
+if test x"$with_alsamixer" != xno ; then
+	AC_DEFINE_UNQUOTED(ALSA_VOLUME_MIXER, "$withval",[Defines which alsa mixer to use for volume control])
+fi
+
+AC_ARG_WITH(fbdev,
+	AC_HELP_STRING([--with-fbdev=devicename], [use devicename for framebuffer device, e.g. /dev/fb0 ]),
+	[[with_fbdev=$withval]],
+	[[with_fbdev=no]]
+)
+if test x"$with_fbdev" != xno ; then
+	AC_DEFINE_UNQUOTED(FB_DEV, "$withval", [Defines which device to use for main framebuffer (e.g. /dev/fb0)])
+fi
+
+AC_ARG_WITH(lcddev,
+	AC_HELP_STRING([--with-lcddev=devicename], [use devicename for lcd framebuffer device, e.g. /dev/fb1 ]),
+	[[with_lcddev=$withval]],
+	[[with_lcddev=no]]
+)
+if test x"$with_lcddev" != xno ; then
+	AC_DEFINE_UNQUOTED(LCD_DEV, "$withval", [Defines which device to use for lcd (e.g. /dev/fb1)])
+fi
+
+AC_ARG_WITH(alphablendingacceleration,
+	AC_HELP_STRING([--with-alphablendingacceleration=never/always/auto], [alphablending acceleration strategy: never accelerate / always accelerate / automatically decide when to accelerate (default)]),
+	[[with_alphablendingacceleration=$withval]],
+	[[with_alphablendingacceleration=auto]]
+)
+
+if test x"$with_alphablendingacceleration" = xnever ; then
+	AC_DEFINE_UNQUOTED(FORCE_NO_BLENDING_ACCELERATION, 1, [Do not attempt to accelerate alphablending blits])
+elif test x"$with_alphablendingacceleration" = xalways ; then
+	AC_DEFINE_UNQUOTED(FORCE_ALPHABLENDING_ACCELERATION, 1, [Accelerate alphablending blits])
+fi
+
+AC_ARG_WITH(accelerationthreshold,
+	AC_HELP_STRING([--with-accelerationthreshold=n], [use acceleration threshold of n bytes]),
+	[[with_accelerationthreshold=$withval]],
+	[[with_accelerationthreshold=48000]]
+)
+
+AC_DEFINE_UNQUOTED(GFX_SURFACE_ACCELERATION_THRESHOLD, $with_accelerationthreshold,[Configure threshold for accelerated surfaces (in bytes)])
+
+AC_ARG_WITH(fillaccelerationthreshold,
+	AC_HELP_STRING([--with-fillaccelerationthreshold=n], [use fill acceleration threshold of n bytes]),
+	[[with_fillaccelerationthreshold=$withval]],
+	[[with_fillaccelerationthreshold=80000]]
+)
+
+AC_DEFINE_UNQUOTED(GFX_SURFACE_FILL_ACCELERATION_THRESHOLD, $with_fillaccelerationthreshold,[Configure threshold for accelerated fill operations (in bytes)])
+
+AC_ARG_WITH(blitaccelerationthreshold,
+	AC_HELP_STRING([--with-blitaccelerationthreshold=n], [use blit acceleration threshold of n bytes]),
+	[[with_blitaccelerationthreshold=$withval]],
+	[[with_blitaccelerationthreshold=0]]
+)
+
+AC_DEFINE_UNQUOTED(GFX_SURFACE_BLIT_ACCELERATION_THRESHOLD, $with_blitaccelerationthreshold,[Configure threshold for accelerated blit operations (in bytes)])
+
+AC_ARG_WITH(accelerationaccumulation,
+	AC_HELP_STRING([--with-accelerationaccumulation], [accumulate blit/fill acceleration operations]),
+	[[with_accelerationaccumulation=$withval]],
+	[[with_accelerationaccumulation=no]]
+)
+
+if test x"$with_accelerationaccumulation" = xyes ; then
+	AC_DEFINE(SUPPORT_ACCUMULATED_ACCELERATION_OPERATIONS, 1,[Accumulate blit/fill acceleration operations])
+fi
+
+AC_ARG_WITH(olde2api,
+	AS_HELP_STRING([--with-olde2api],[use olde2api, yes or no]),
+	[with_olde2api=$withval],[with_olde2api=no])
+if test x"$with_olde2api" != xno ; then
+	AC_DEFINE(HAVE_OLDE2_API, 1,[define add old api of enigma2])
+fi
+
+AC_CHECK_HEADERS([sys/klog.h])
+AC_CHECK_FUNCS([klogctl])
+
+AC_CHECK_HEADERS([shadow.h])
+AC_CHECK_LIB([crypt], [crypt], [BASE_LIBS+=" -lcrypt"], [AC_MSG_ERROR([Could not find crypt])])
+AC_CHECK_LIB([rt], [clock_gettime], [BASE_LIBS+=" -lrt"], [AC_MSG_ERROR([Could not find rt])])
+
+ENIGMA2_CFLAGS="-fno-rtti -fno-exceptions -rdynamic -funwind-tables"
+AC_SUBST(ENIGMA2_CFLAGS)
+
+AX_CXX_COMPILE_STDCXX_17([ext],[mandatory])
+
+AX_CHECK_COMPILE_FLAG([-Wattribute-alias], [CXXFLAGS="$CXXFLAGS -Wattribute-alias"])
+AX_CHECK_COMPILE_FLAG([-Wattribute-alias=1], [CXXFLAGS="$CXXFLAGS -Wattribute-alias=1"])
+
+CPPFLAGS="$CPPFLAGS $PYTHON_CPPFLAGS"
+CFLAGS="$CFLAGS -Wall"
+CXXFLAGS="$CXXFLAGS -Wall -Wextra \
+	-Wformat=2 -Wformat-overflow=2 -Wformat-nonliteral -Wformat-security \
+	-Wimplicit-fallthrough=5 -Wduplicated-branches -Wtrampolines \
+	-Wdangling-else -Wshift-overflow=2 -Wswitch \
+	-Wunused-but-set-parameter -Wunused-const-variable=1 -Wuninitialized \
+	-Wstringop-overflow=3 -Woverlength-strings \
+	-Wunsafe-loop-optimizations -Wpointer-arith \
+	-Wfloat-equal -Wlogical-op \
+	-Wno-error=maybe-uninitialized \
+	-Wno-error=ignored-qualifiers \
+	-Wno-error=shadow -Wno-error=cast-qual \
+	-Wno-error=aggregate-return -Wno-error=missing-field-initializers \
+	-Wno-error=packed -Wno-error=vla -Wno-error=clobbered -Wno-error=unused-parameter \
+	$BASE_CFLAGS $ENIGMA2_CFLAGS $PTHREAD_CFLAGS $OPENMP_CFLAGS $ALSA_CFLAGS $GLES_CFLAGS"
+
+ARFLAGS="cr"
+AC_SUBST(ARFLAGS)
+AR_FLAGS="cr"
+AC_SUBST(AR_FLAGS)
+
+AC_CONFIG_FILES([
+Makefile
+data/Makefile
+data/fonts/Makefile
+data/countries/Makefile
+data/display/Makefile
+data/display/display/Makefile
+data/display/display96/Makefile
+data/display/display128/Makefile
+data/display/display128dm/Makefile
+data/display/display220/Makefile
+data/display/display240/Makefile
+data/display/display390/Makefile
+data/display/display400/Makefile
+data/display/display480/Makefile
+data/display/display720/Makefile
+data/display/display800/Makefile
+data/display/displaytext/Makefile
+data/display/grautec70x0/Makefile
+data/display/grautec70x0/fonts/Makefile
+data/display/grautec8000/Makefile
+data/display/grautec8000/fonts/Makefile
+data/extensions/Makefile
+data/keymaps/Makefile
+data/hw_info/Makefile
+data/rc_models/Makefile
+data/skin_default/Makefile
+data/skin_default/menu/Makefile
+data/skin_default/icons/Makefile
+data/skin_default/buttons/Makefile
+data/skin_default/epg/Makefile
+data/skin_default/spinner/Makefile
+data/skin_default/LCDIcons/Makefile
+include/Makefile
+lib/Makefile
+lib/base/eenv.cpp
+lib/python/Makefile
+lib/python/Components/Makefile
+lib/python/Components/Addons/Makefile
+lib/python/Components/Converter/Makefile
+lib/python/Components/Renderer/Makefile
+lib/python/Components/Sources/Makefile
+lib/python/Screens/Makefile
+lib/python/Plugins/Makefile
+lib/python/Plugins/SystemPlugins/AnimationSetup/Makefile
+lib/python/Plugins/SystemPlugins/CableScan/Makefile
+lib/python/Plugins/SystemPlugins/FastScan/Makefile
+lib/python/Plugins/SystemPlugins/OSDPositionSetup/Makefile
+lib/python/Plugins/SystemPlugins/OSD3DSetup/Makefile
+lib/python/Plugins/SystemPlugins/HdmiCEC/Makefile
+lib/python/Plugins/SystemPlugins/VideoClippingSetup/Makefile
+lib/python/Plugins/Extensions/CutListEditor/Makefile
+lib/python/Plugins/Extensions/CutListEditor/meta/Makefile
+lib/python/Plugins/Extensions/DVDBurn/Makefile
+lib/python/Plugins/Extensions/DVDBurn/meta/Makefile
+lib/python/Plugins/Extensions/DVDPlayer/Makefile
+lib/python/Plugins/Extensions/DVDPlayer/meta/Makefile
+lib/python/Plugins/Extensions/GraphMultiEPG/Makefile
+lib/python/Plugins/Extensions/GraphMultiEPG/meta/Makefile
+lib/python/Plugins/Extensions/Makefile
+lib/python/Plugins/Extensions/MediaPlayer/Makefile
+lib/python/Plugins/Extensions/MediaPlayer/meta/Makefile
+lib/python/Plugins/Extensions/MediaScanner/Makefile
+lib/python/Plugins/Extensions/MediaScanner/meta/Makefile
+lib/python/Plugins/Extensions/PicturePlayer/Makefile
+lib/python/Plugins/Extensions/PicturePlayer/meta/Makefile
+lib/python/Plugins/Extensions/PicturePlayer/data/Makefile
+lib/python/Plugins/Extensions/SocketMMI/Makefile
+lib/python/Plugins/Extensions/SocketMMI/meta/Makefile
+lib/python/Plugins/Extensions/SocketMMI/src/Makefile
+lib/python/Plugins/PLi/Makefile
+lib/python/Plugins/SystemPlugins/CommonInterfaceAssignment/Makefile
+lib/python/Plugins/SystemPlugins/CommonInterfaceAssignment/meta/Makefile
+lib/python/Plugins/SystemPlugins/DefaultServicesScanner/Makefile
+lib/python/Plugins/SystemPlugins/DefaultServicesScanner/meta/Makefile
+lib/python/Plugins/SystemPlugins/DiseqcTester/Makefile
+lib/python/Plugins/SystemPlugins/DiseqcTester/meta/Makefile
+lib/python/Plugins/SystemPlugins/FastChannelChange/Makefile
+lib/python/Plugins/SystemPlugins/FastChannelChange/meta/Makefile
+lib/python/Plugins/SystemPlugins/Hotplug/Makefile
+lib/python/Plugins/SystemPlugins/Hotplug/meta/Makefile
+lib/python/Plugins/SystemPlugins/Makefile
+lib/python/Plugins/SystemPlugins/TempFanControl/Makefile
+lib/python/Plugins/SystemPlugins/TempFanControl/meta/Makefile
+lib/python/Plugins/SystemPlugins/NetworkWizard/Makefile
+lib/python/Plugins/SystemPlugins/NetworkWizard/meta/Makefile
+lib/python/Plugins/SystemPlugins/PositionerSetup/Makefile
+lib/python/Plugins/SystemPlugins/PositionerSetup/meta/Makefile
+lib/python/Plugins/SystemPlugins/SatelliteEquipmentControl/Makefile
+lib/python/Plugins/SystemPlugins/SatelliteEquipmentControl/meta/Makefile
+lib/python/Plugins/SystemPlugins/Satfinder/Makefile
+lib/python/Plugins/SystemPlugins/Satfinder/meta/Makefile
+lib/python/Plugins/SystemPlugins/SoftwareManager/Makefile
+lib/python/Plugins/SystemPlugins/SoftwareManager/meta/Makefile
+lib/python/Plugins/SystemPlugins/VideoEnhancement/Makefile
+lib/python/Plugins/SystemPlugins/VideoEnhancement/meta/Makefile
+lib/python/Plugins/SystemPlugins/VideoTune/Makefile
+lib/python/Plugins/SystemPlugins/VideoTune/meta/Makefile
+lib/python/Plugins/SystemPlugins/Videomode/Makefile
+lib/python/Plugins/SystemPlugins/Videomode/meta/Makefile
+lib/python/Plugins/SystemPlugins/WirelessLan/Makefile
+lib/python/Plugins/SystemPlugins/WirelessLan/meta/Makefile
+lib/python/Tools/Makefile
+po/Makefile
+main/Makefile
+tools/Makefile
+tools/enigma2.sh
+enigma2.pc
+])
+AC_OUTPUT
